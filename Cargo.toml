@@ -1,0 +1,8 @@
+[workspace]
+
+members = [
+  "ip_port_sniffer",
+  "siple_fetch",
+  "scrape_url",
+  "snake",
+]
