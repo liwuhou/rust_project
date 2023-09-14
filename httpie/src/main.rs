@@ -5,10 +5,14 @@ use colored::*;
 use mime::Mime;
 use reqwest::{header, Client, Response, Url};
 use std::{collections::HashMap, str::FromStr};
+use syntect::easy::HighlightLines;
+use syntect::highlighting::{Style, ThemeSet};
+use syntect::parsing::SyntaxSet;
+use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
-// 定义 HTTPie 的 CLI 主入口，包含多个命令
-// 下面 /// 的注释是文档， clap 会将其当成是 CLI 的帮助
+// Use `///` to describe this cli's help text
 
+// Define the Cli options
 /// A naive httpie implementation wite Rust, can you imagine how easy it is?
 #[derive(Parser, Debug)]
 struct Opts {
@@ -16,7 +20,7 @@ struct Opts {
     subcmd: SubCommand,
 }
 
-/// 子命令分别对应不同的 HTTP 方法，暂时只支持 GET / POST 方法
+/// You can use Get or Post to fetch some url
 #[derive(Parser, Debug)]
 enum SubCommand {
     Get(Get),
@@ -47,14 +51,12 @@ impl FromStr for KvPair {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // 使用 = 进行 split，这会得到一个迭代器
         let mut split = s.split('=');
         let err = || anyhow!(format!("Failed to parse {}", s));
         Ok(Self {
-            // 从迭代器中取第一个结果作为 key，迭代器返回 Some(T)/None
-            // 我们将其转换成 Ok(T)/Err(E)，然后用 ? 处理错误
+            // key
             k: (split.next().ok_or_else(err)?).to_string(),
-            // 从迭代器中取第二个结果作为 value
+            // value
             v: (split.next().ok_or_else(err)?).to_string(),
         })
     }
@@ -104,9 +106,29 @@ fn get_content_type(resp: &Response) -> Option<Mime> {
 }
 
 fn print_body(m: Option<Mime>, body: &String) {
+    let ps = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+
     match m {
         Some(v) if v == mime::APPLICATION_JSON => {
-            println!("{}", jsonxf::pretty_print(body).unwrap().cyan())
+            let syntax = ps.find_syntax_by_extension("json").unwrap();
+            let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+
+            for line in LinesWithEndings::from(body) {
+                let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap();
+                let escaped = as_24_bit_terminal_escaped(&ranges[..], true);
+                print!("{}", escaped);
+            }
+        }
+        Some(v) if v == mime::TEXT_HTML => {
+            let syntax = ps.find_syntax_by_extension("HTML").unwrap();
+            let mut h = HighlightLines::new(syntax, &ts.themes["base16-ocean.dark"]);
+
+            for line in LinesWithEndings::from(body) {
+                let ranges: Vec<(Style, &str)> = h.highlight_line(line, &ps).unwrap();
+                let escaped = as_24_bit_terminal_escaped(&ranges[..], true);
+                print!("{}", escaped);
+            }
         }
         _ => println!("{}", body),
     }
@@ -135,7 +157,46 @@ async fn main() -> Result<()> {
         SubCommand::Post(ref args) => post(client, args).await?,
     };
 
-    println!("{:?}", opts);
-
     Ok(result)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_url_works() {
+        assert!(parse_url("abc").is_err());
+        assert!(parse_url("http://abc.xyz").is_ok());
+        assert!(parse_url("https://httpbin.org/post").is_ok());
+    }
+
+    #[test]
+    fn parse_kv_pair_works() {
+        assert!(parse_kv_pair("a").is_err());
+
+        assert_eq!(
+            parse_kv_pair("a=1").unwrap(),
+            KvPair {
+                k: "a".into(),
+                v: "1".into(),
+            }
+        );
+
+        assert_eq!(
+            parse_kv_pair("b=").unwrap(),
+            KvPair {
+                k: "b".into(),
+                v: "".into()
+            }
+        );
+
+        assert_eq!(
+            parse_kv_pair("a=b").unwrap(),
+            KvPair {
+                k: "a".into(),
+                v: "b".into(),
+            }
+        );
+    }
 }
