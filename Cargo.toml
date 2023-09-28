@@ -7,4 +7,5 @@ members = [
   "snake",
 	"httpie",
 	"thumbor",
+  "minigrep"
 ]
